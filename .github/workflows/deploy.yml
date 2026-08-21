@@ -1,0 +1,50 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.VPS_PATH }}
+            git fetch origin main
+            git reset --hard origin/main
+
+            # ---- 同步 vps-callhome → /root/vps-callhome ----
+            # 保护运行目录的 .env / data / .venv / firebase 服务账号，不被删不被动
+            rsync -av --delete \
+              --exclude='.env' \
+              --exclude='data/' \
+              --exclude='.venv/' \
+              --exclude='venv/' \
+              --exclude='firebase-service-account.json' \
+              --exclude='__pycache__/' \
+              --exclude='*.bak*' \
+              --exclude='*.log' \
+              --exclude='.git' \
+              vps-callhome/ /root/vps-callhome/
+
+            # ---- 同步 aries-memory → /opt/aries-memory ----
+            rsync -av --delete \
+              --exclude='.env' \
+              --exclude='data/' \
+              --exclude='venv/' \
+              --exclude='__pycache__/' \
+              --exclude='*.log' \
+              --exclude='.git' \
+              aries-memory/ /opt/aries-memory/
+
+            # ---- 重启服务使改动生效 ----
+            systemctl restart memory-palace.service aries-memory.service
+            echo "DEPLOY_DONE"
