@@ -18,8 +18,9 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.VPS_PATH }}
-            git fetch origin main
-            git reset --hard origin/main
+            # 大陆 VPS 直连 GitHub 偶发 HTTP2 framing 错误，强制 HTTP/1.1 更稳
+            git -c http.version=HTTP/1.1 fetch origin main
+            git -c http.version=HTTP/1.1 reset --hard origin/main
 
             # ---- 同步 vps-callhome → /root/vps-callhome ----
             # 保护运行目录的 .env / data / .venv / firebase 服务账号，不被删不被动
