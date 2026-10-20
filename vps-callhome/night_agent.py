@@ -163,7 +163,7 @@ def _readable_entries(context):
     return (fresh + other)[:32]
 
 
-def _write_book(kind, raw):
+def _write_book(kind, raw, thread_id="a1"):
     """One small, local-only note or diary; never perform arbitrary UI/API actions."""
     import mc_store
     if kind == "note":
@@ -179,7 +179,13 @@ def _write_book(kind, raw):
         raise ValueError("diary is incomplete")
     rec = mc_store.make_base("d", author="ai", title=title, content=body,
                              visibility="visible", locked=False)
+    rec["threadId"] = thread_id
     mc_store.insert("diary", rec)
+    try:
+        import experiences
+        experiences.record("diary_write", rec, rec.get("createdAt"), source=rec["id"])
+    except (ImportError, OSError, ValueError):
+        pass
     return "写日记", title
 
 
@@ -219,7 +225,7 @@ def _decide(context, ordinal, target, now):
         diary = re.fullmatch(r"⟪写日记:([^⟫]{4,560})⟫", raw, re.S)
         if note or diary:
             try:
-                action, title = _write_book("note" if note else "diary", (note or diary).group(1))
+                action, title = _write_book("note" if note else "diary", (note or diary).group(1), context["thread_id"])
                 _record_action(now, action, title, "已写入")
                 result = "已经写进本子了。"
             except (ImportError, OSError, ValueError):
