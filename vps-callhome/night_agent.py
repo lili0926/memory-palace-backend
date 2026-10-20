@@ -183,8 +183,11 @@ def run_once(now=None):
     now = time.time() if now is None else now
     with LOCK:
         context = _read(CONTEXT)
-        if not context.get("enabled") or now - context.get("updated", 0) >= 36 * 3600:
+        if not context.get("enabled"):
             return "no_context"
+        if now - context.get("updated", 0) >= 36 * 3600:
+            CONTEXT.unlink(missing_ok=True)
+            return "expired"
         night = _night(now, context["timezone"])
         if not night:
             return "day"
