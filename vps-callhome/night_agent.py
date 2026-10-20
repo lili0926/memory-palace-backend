@@ -23,6 +23,7 @@ from wake import store
 ROOT = Path(os.getenv("NIGHT_AGENT_DIR", "/root/vps-callhome/data"))
 CONTEXT = ROOT / "night_agent_context.json"
 STATE = ROOT / "night_agent_state.json"
+ACTIONS = ROOT / "night_agent_actions.json"
 LOCK = threading.Lock()
 STARTED = False
 
@@ -88,7 +89,7 @@ def configure(data):
             if row.get("role") in ("user", "assistant"):
                 messages.append({"role": row["role"], "content": str(row.get("content") or "")[:1800]})
         entries = []
-        for row in (data.get("entries") or [])[:16]:
+        for row in (data.get("entries") or [])[:32]:
             entries.append({"id": str(row.get("id") or "")[:12],
                             "kind": str(row.get("kind") or "")[:20],
                             "title": str(row.get("title") or "")[:80],
@@ -110,7 +111,18 @@ def status():
     return {"enabled": bool(context.get("enabled") and time.time() - context.get("updated", 0) < 36 * 3600),
             "last_sync": context.get("updated"), "night": state.get("night"),
             "target": state.get("target", 0), "cursor": state.get("cursor", 0),
-            "last_result": state.get("last_result", "")}
+            "last_result": state.get("last_result", ""),
+            "actions": _read(ACTIONS).get("rows", [])[-80:]}
+
+
+def _record_action(at, action, target="", result=""):
+    """Keep a small receipt of what actually happened, never prompts or chat text."""
+    with LOCK:
+        rows = _read(ACTIONS).get("rows", [])
+        rows.append({"id": f"vps:{int(at * 1000)}:{len(rows)}", "at": int(at * 1000),
+                     "source": "夜间自动唤醒", "action": action,
+                     "target": str(target)[:80], "result": str(result)[:40]})
+        _write(ACTIONS, {"rows": rows[-100:]})
 
 
 def _call(context, system, messages):
@@ -134,7 +146,7 @@ def _call(context, system, messages):
 
 
 def _readable_entries(context):
-    """Read the two VPS-backed books live; album/weather remain dated phone snapshots."""
+    """Read the two VPS-backed books live; other modules remain dated phone snapshots."""
     fresh = []
     try:
         import mc_store
@@ -148,7 +160,7 @@ def _readable_entries(context):
                  if x.get("kind") in ("日记", "纸条")]
     other = [x for x in context.get("entries", [])
              if x.get("kind") not in ("日记", "纸条")]
-    return (fresh + other)[:16]
+    return (fresh + other)[:32]
 
 
 def _decide(context, ordinal, target, now):
@@ -168,6 +180,8 @@ def _decide(context, ordinal, target, now):
     found = re.fullmatch(r"⟪翻看:([^⟫]{1,12})⟫", raw)
     if found:
         item = next((x for x in entries if x["id"] == found.group(1)), None)
+        if item:
+            context["_read_action"] = {"kind": item["kind"], "title": item["title"]}
         detail = ("你刚翻到" + item["kind"] + "《" + item["title"] + "》：" + item["body"]) if item else "那份资料没有找到。"
         provenance = "旧快照" if item and item["kind"] not in ("日记", "纸条") else "资料"
         system += "\n【你刚翻到的资料】" + detail + "\n这是" + provenance + "、不是 Jasmine 新发言。现在只能沉默或直接说话。"
@@ -210,6 +224,9 @@ def run_once(now=None):
         _write(STATE, state)
     try:
         lines = _decide(context, cursor + 1, state["target"], now)
+        item = context.get("_read_action")
+        if item:
+            _record_action(now, "翻看", item["kind"] + "《" + item["title"] + "》", "已读到")
         if lines and _night(now, context["timezone"]):
             for line in lines:
                 store.enqueue_wake({"user_id": "default", "reason": "night_agent",
@@ -219,6 +236,7 @@ def run_once(now=None):
         result = "sent" if lines else "silent"
     except Exception as exc:
         result = "error:" + type(exc).__name__
+    _record_action(now, "醒来", "第 " + str(cursor + 1) + " 次", result)
     with LOCK:
         latest = _read(STATE)
         if latest.get("night") == key and latest.get("cursor") == cursor + 1:
@@ -240,4 +258,3 @@ def start():
                 print("[night-agent]", type(exc).__name__)
             time.sleep(60)
     threading.Thread(target=loop, daemon=True, name="night-agent").start()
-
