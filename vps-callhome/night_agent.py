@@ -209,7 +209,7 @@ def _decide(context, ordinal, target, now):
     if found:
         item = next((x for x in entries if x["id"] == found.group(1)), None)
         if item:
-            context["_read_action"] = {"kind": item["kind"], "title": item["title"]}
+            _record_action(now, "翻看", item["kind"] + "《" + item["title"] + "》", "已读到")
         detail = ("你刚翻到" + item["kind"] + "《" + item["title"] + "》：" + item["body"]) if item else "那份资料没有找到。"
         provenance = "旧快照" if item and item["kind"] not in ("日记", "纸条") else "资料"
         system += "\n【你刚翻到的资料】" + detail + "\n这是" + provenance + "、不是 Jasmine 新发言。现在只能沉默或直接说话。"
@@ -220,7 +220,7 @@ def _decide(context, ordinal, target, now):
         if note or diary:
             try:
                 action, title = _write_book("note" if note else "diary", (note or diary).group(1))
-                context["_write_action"] = {"action": action, "title": title}
+                _record_action(now, action, title, "已写入")
                 result = "已经写进本子了。"
             except (ImportError, OSError, ValueError):
                 result = "没有写进去；不要说自己写好了。"
@@ -264,12 +264,6 @@ def run_once(now=None):
         _write(STATE, state)
     try:
         lines = _decide(context, cursor + 1, state["target"], now)
-        item = context.get("_read_action")
-        if item:
-            _record_action(now, "翻看", item["kind"] + "《" + item["title"] + "》", "已读到")
-        written = context.get("_write_action")
-        if written:
-            _record_action(now, written["action"], written["title"], "已写入")
         if lines and _night(now, context["timezone"]):
             for line in lines:
                 store.enqueue_wake({"user_id": "default", "reason": "night_agent",
